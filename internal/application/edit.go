@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Service) PutUnitsBatch(ctx context.Context, cmd BatchPutUnitsCommand) (BatchPutUnitsResult, error) {
-	if data, ok, err := s.repo.IdempotentResult(ctx, cmd.IdempotencyKey); ok || err != nil {
+	if data, ok, err := s.repo.IdempotentResultFor(ctx, cmd.IdempotencyKey, cmd.DossierID, domain.EventUnitsBatchCreated, strings.TrimSpace(cmd.Actor)); ok || err != nil {
 		var result BatchPutUnitsResult
 		if err == nil {
 			err = json.Unmarshal(data, &result)

@@ -32,7 +32,8 @@ func (s *SQLiteStore) Create(ctx context.Context, snapshot domain.Snapshot, key 
 	if err := persistChildren(ctx, tx, snapshot); err != nil {
 		return err
 	}
-	if err := insertIdempotency(ctx, tx, key, snapshot.Dossier.ID, response); err != nil {
+	dossierID, requestType, actor := idempotencyScope(snapshot)
+	if err := insertIdempotency(ctx, tx, key, dossierID, requestType, actor, response); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -65,7 +66,8 @@ func (s *SQLiteStore) Save(ctx context.Context, snapshot domain.Snapshot, expect
 	if err := persistChildren(ctx, tx, snapshot); err != nil {
 		return err
 	}
-	if err := insertIdempotency(ctx, tx, key, snapshot.Dossier.ID, response); err != nil {
+	dossierID, requestType, actor := idempotencyScope(snapshot)
+	if err := insertIdempotency(ctx, tx, key, dossierID, requestType, actor, response); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -121,11 +123,23 @@ func persistChildren(ctx context.Context, tx *sql.Tx, snapshot domain.Snapshot) 
 	return nil
 }
 
-func insertIdempotency(ctx context.Context, tx *sql.Tx, key, dossierID string, response json.RawMessage) error {
+// idempotencyScope derives the (dossierID, requestType, actor) triple that
+// scopes an idempotency record from the snapshot's own audit trail. The last
+// audit entry records the request type and actor that produced this revision,
+// which is exactly the scope a legitimate retry must match.
+func idempotencyScope(snapshot domain.Snapshot) (string, string, string) {
+	if len(snapshot.Audit) == 0 {
+		return snapshot.Dossier.ID, "", ""
+	}
+	last := snapshot.Audit[len(snapshot.Audit)-1]
+	return snapshot.Dossier.ID, last.EventType, last.Actor
+}
+
+func insertIdempotency(ctx context.Context, tx *sql.Tx, key, dossierID, requestType, actor string, response json.RawMessage) error {
 	if key == "" {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO idempotency_results(idempotency_key,dossier_id,response_json,created_at) VALUES(?,?,?,?)`, key, dossierID, []byte(response), time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := tx.ExecContext(ctx, `INSERT INTO idempotency_results(idempotency_key,dossier_id,request_type,actor,response_json,created_at) VALUES(?,?,?,?,?,?)`, key, dossierID, requestType, actor, []byte(response), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil && isConstraint(err) {
 		return domain.NewError(domain.CodeConflict, "idempotencyKey 已被使用")
 	}
@@ -187,6 +201,33 @@ func (s *SQLiteStore) IdempotentResult(ctx context.Context, key string) (json.Ra
 	}
 	var data []byte
 	err := s.db.QueryRowContext(ctx, `SELECT response_json FROM idempotency_results WHERE idempotency_key=?`, key).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return json.RawMessage(data), true, nil
+}
+
+// IdempotentResultFor looks up a cached idempotent result scoped to the target
+// dossier, request type and actor. An empty dossierID (used for dossier
+// creation, where the ID is generated during the request) matches any dossier,
+// so legitimate create retries still replay the original result while reusing
+// the same key for a different actor or a different request type yields no
+// match and the subsequent insert fails with a conflict.
+func (s *SQLiteStore) IdempotentResultFor(ctx context.Context, key, dossierID, requestType, actor string) (json.RawMessage, bool, error) {
+	if key == "" {
+		return nil, false, nil
+	}
+	query := `SELECT response_json FROM idempotency_results WHERE idempotency_key=? AND request_type=? AND actor=?`
+	args := []any{key, requestType, actor}
+	if dossierID != "" {
+		query += ` AND dossier_id=?`
+		args = append(args, dossierID)
+	}
+	var data []byte
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}

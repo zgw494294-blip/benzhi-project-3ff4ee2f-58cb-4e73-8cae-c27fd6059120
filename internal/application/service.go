@@ -28,7 +28,7 @@ func NewService(repo store.Repository, analyzer *evidence.Analyzer, issuer *evid
 }
 
 func (s *Service) CreateDossier(ctx context.Context, cmd CreateDossierCommand) (domain.Snapshot, error) {
-	if result, ok, err := s.cachedSnapshot(ctx, cmd.IdempotencyKey); ok || err != nil {
+	if result, ok, err := s.cachedSnapshot(ctx, cmd.IdempotencyKey, "", domain.EventDossierCreated, strings.TrimSpace(cmd.Actor)); ok || err != nil {
 		return result, err
 	}
 	if err := requireCommand(cmd.Actor, cmd.IdempotencyKey); err != nil {
@@ -55,8 +55,12 @@ func (s *Service) ListDossiers(ctx context.Context, limit, offset int) ([]domain
 	return s.repo.List(ctx, limit, offset)
 }
 
-func (s *Service) cachedSnapshot(ctx context.Context, key string) (domain.Snapshot, bool, error) {
-	data, ok, err := s.repo.IdempotentResult(ctx, key)
+// cachedSnapshot replays a previously persisted result only when the
+// idempotency key, target dossier, request type and actor all match the
+// original request. This prevents a key minted for one dossier, request type
+// or actor from leaking another request's full history snapshot.
+func (s *Service) cachedSnapshot(ctx context.Context, key, dossierID, requestType, actor string) (domain.Snapshot, bool, error) {
+	data, ok, err := s.repo.IdempotentResultFor(ctx, key, dossierID, requestType, actor)
 	if err != nil || !ok {
 		return domain.Snapshot{}, ok, err
 	}
@@ -68,7 +72,7 @@ func (s *Service) cachedSnapshot(ctx context.Context, key string) (domain.Snapsh
 }
 
 func (s *Service) mutate(ctx context.Context, id string, expected int64, actor, key, event, summary string, change func(*domain.Snapshot) error) (domain.Snapshot, error) {
-	if result, ok, err := s.cachedSnapshot(ctx, key); ok || err != nil {
+	if result, ok, err := s.cachedSnapshot(ctx, key, id, event, strings.TrimSpace(actor)); ok || err != nil {
 		return result, err
 	}
 	if err := requireCommand(actor, key); err != nil {
