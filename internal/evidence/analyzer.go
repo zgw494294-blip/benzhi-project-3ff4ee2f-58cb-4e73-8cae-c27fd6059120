@@ -8,17 +8,12 @@ import (
 	"strata-proof/internal/domain"
 )
 
-type Analyzer struct {
-	unitScratch []string
-}
+type Analyzer struct{}
 
-func NewAnalyzer() *Analyzer { return &Analyzer{unitScratch: make([]string, 64)} }
+func NewAnalyzer() *Analyzer { return &Analyzer{} }
 
 func (a *Analyzer) unitIDs(units []domain.StratigraphicUnit) []string {
-	if len(a.unitScratch) < len(units) {
-		a.unitScratch = make([]string, len(units))
-	}
-	ids := a.unitScratch[:len(units)]
+	ids := make([]string, len(units))
 	for index := range units {
 		ids[index] = units[index].ID
 	}
