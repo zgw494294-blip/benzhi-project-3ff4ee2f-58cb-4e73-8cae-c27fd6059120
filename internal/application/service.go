@@ -43,6 +43,9 @@ func (s *Service) CreateDossier(ctx context.Context, cmd CreateDossierCommand) (
 	snapshot := domain.Snapshot{Dossier: dossier, Units: []domain.StratigraphicUnit{}, Relations: []domain.StratigraphicRelation{}, Findings: []domain.ConsistencyFinding{}, Credentials: []domain.ResearchCredential{}, Audit: []domain.AuditEntry{created}}
 	response, _ := json.Marshal(snapshot)
 	if err := s.repo.Create(ctx, snapshot, cmd.IdempotencyKey, response); err != nil {
+		if result, ok, retryErr := s.cachedSnapshot(ctx, cmd.IdempotencyKey); ok || retryErr != nil {
+			return result, retryErr
+		}
 		return domain.Snapshot{}, err
 	}
 	return snapshot, nil
@@ -76,12 +79,21 @@ func (s *Service) mutate(ctx context.Context, id string, expected int64, actor, 
 	}
 	snapshot, err := s.repo.Get(ctx, id)
 	if err != nil {
+		if result, ok, retryErr := s.cachedSnapshot(ctx, key); ok || retryErr != nil {
+			return result, retryErr
+		}
 		return snapshot, err
 	}
 	if snapshot.Dossier.Version != expected {
+		if result, ok, retryErr := s.cachedSnapshot(ctx, key); ok || retryErr != nil {
+			return result, retryErr
+		}
 		return snapshot, domain.NewError(domain.CodeConflict, "expectedVersion=%d 与当前版本 %d 不符", expected, snapshot.Dossier.Version)
 	}
 	if err := change(&snapshot); err != nil {
+		if result, ok, retryErr := s.cachedSnapshot(ctx, key); ok || retryErr != nil {
+			return result, retryErr
+		}
 		return snapshot, err
 	}
 	now := s.now().UTC()
@@ -94,6 +106,9 @@ func (s *Service) mutate(ctx context.Context, id string, expected int64, actor, 
 	snapshot.Audit = append(snapshot.Audit, audit)
 	response, _ := json.Marshal(snapshot)
 	if err := s.repo.Save(ctx, snapshot, expected, key, response); err != nil {
+		if result, ok, retryErr := s.cachedSnapshot(ctx, key); ok || retryErr != nil {
+			return result, retryErr
+		}
 		return domain.Snapshot{}, err
 	}
 	return snapshot, nil

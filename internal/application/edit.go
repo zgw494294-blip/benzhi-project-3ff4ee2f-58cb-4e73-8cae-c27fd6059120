@@ -26,12 +26,21 @@ func (s *Service) PutUnitsBatch(ctx context.Context, cmd BatchPutUnitsCommand) (
 	}
 	snapshot, err := s.repo.Get(ctx, cmd.DossierID)
 	if err != nil {
+		if retry, ok, retryErr := s.cachedBatchResult(ctx, cmd.IdempotencyKey); ok || retryErr != nil {
+			return retry, retryErr
+		}
 		return BatchPutUnitsResult{}, err
 	}
 	if snapshot.Dossier.Version != cmd.ExpectedVersion {
+		if retry, ok, retryErr := s.cachedBatchResult(ctx, cmd.IdempotencyKey); ok || retryErr != nil {
+			return retry, retryErr
+		}
 		return BatchPutUnitsResult{}, domain.NewError(domain.CodeConflict, "expectedVersion=%d 与当前版本 %d 不符", cmd.ExpectedVersion, snapshot.Dossier.Version)
 	}
 	if err := s.policy.RequireRecorder(snapshot, cmd.Actor); err != nil {
+		if retry, ok, retryErr := s.cachedBatchResult(ctx, cmd.IdempotencyKey); ok || retryErr != nil {
+			return retry, retryErr
+		}
 		return BatchPutUnitsResult{}, err
 	}
 	inputs := make([]domain.BatchUnitInput, 0, len(cmd.Rows))
@@ -43,6 +52,9 @@ func (s *Service) PutUnitsBatch(ctx context.Context, cmd BatchPutUnitsCommand) (
 		inputs = append(inputs, domain.BatchUnitInput{Row: row.Row, Unit: unit})
 	}
 	if details := domain.ValidateUnitBatch(snapshot.Dossier.Status, snapshot.Units, inputs); len(details) > 0 {
+		if retry, ok, retryErr := s.cachedBatchResult(ctx, cmd.IdempotencyKey); ok || retryErr != nil {
+			return retry, retryErr
+		}
 		if details[0].Field == "status" {
 			return BatchPutUnitsResult{}, domain.NewDetailedError(domain.CodeState, "当前案卷状态不允许批量登记单位", details)
 		}
@@ -60,15 +72,33 @@ func (s *Service) PutUnitsBatch(ctx context.Context, cmd BatchPutUnitsCommand) (
 	snapshot.Dossier.UpdatedAt = now
 	audit, err := domain.NextAuditEntry(snapshot.Audit, cmd.DossierID, domain.EventUnitsBatchCreated, cmd.Actor, fmt.Sprintf("批量登记 %d 个地层单位", len(inputs)), now)
 	if err != nil {
+		if retry, ok, retryErr := s.cachedBatchResult(ctx, cmd.IdempotencyKey); ok || retryErr != nil {
+			return retry, retryErr
+		}
 		return BatchPutUnitsResult{}, err
 	}
 	snapshot.Audit = append(snapshot.Audit, audit)
 	result.Snapshot = snapshot
 	response, _ := json.Marshal(result)
 	if err := s.repo.Save(ctx, snapshot, cmd.ExpectedVersion, cmd.IdempotencyKey, response); err != nil {
+		if retry, ok, retryErr := s.cachedBatchResult(ctx, cmd.IdempotencyKey); ok || retryErr != nil {
+			return retry, retryErr
+		}
 		return BatchPutUnitsResult{}, err
 	}
 	return result, nil
+}
+
+func (s *Service) cachedBatchResult(ctx context.Context, key string) (BatchPutUnitsResult, bool, error) {
+	data, ok, err := s.repo.IdempotentResult(ctx, key)
+	if err != nil || !ok {
+		return BatchPutUnitsResult{}, ok, err
+	}
+	var result BatchPutUnitsResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return result, true, err
+	}
+	return result, true, nil
 }
 
 func (s *Service) UpdateDossier(ctx context.Context, cmd UpdateDossierCommand) (domain.Snapshot, error) {
