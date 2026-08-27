@@ -67,8 +67,32 @@ func (s *Service) RelationHistory(ctx context.Context, dossierID, relationID str
 	return domain.RevisionLedger{DossierID: dossierID, RelationID: relationID, UnitRevisions: []domain.StratigraphicUnit{}, RelationRevisions: revisions}, nil
 }
 
+func (s *Service) cachedAuditPage(dossierID string) ([]domain.AuditEntry, bool) {
+	s.auditMu.RLock()
+	defer s.auditMu.RUnlock()
+	entries, ok := s.auditLog[dossierID]
+	if !ok {
+		return nil, false
+	}
+	return append([]domain.AuditEntry(nil), entries...), true
+}
+
+func (s *Service) rememberAuditPage(dossierID string, entries []domain.AuditEntry) {
+	s.auditMu.Lock()
+	defer s.auditMu.Unlock()
+	s.auditLog[dossierID] = append([]domain.AuditEntry(nil), entries...)
+}
+
 func (s *Service) AuditPage(ctx context.Context, dossierID string, limit int, before int64) ([]domain.AuditEntry, error) {
-	return s.repo.AuditPage(ctx, dossierID, limit, before)
+	if entries, ok := s.cachedAuditPage(dossierID); ok {
+		return entries, nil
+	}
+	entries, err := s.repo.AuditPage(ctx, dossierID, limit, before)
+	if err != nil {
+		return nil, err
+	}
+	s.rememberAuditPage(dossierID, entries)
+	return entries, nil
 }
 
 func (s *Service) ValidateFrozenReferences(ctx context.Context, snapshot domain.Snapshot) error {
