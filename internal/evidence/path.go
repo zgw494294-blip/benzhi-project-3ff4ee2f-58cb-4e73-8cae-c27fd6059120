@@ -13,9 +13,13 @@ type pathNode struct {
 }
 
 func TraceRelationPath(snapshot domain.Snapshot, sourceID, targetID string) (domain.RelationPathResult, error) {
+	return NewAnalyzer().TraceRelationPath(snapshot, sourceID, targetID)
+}
+
+func (a *Analyzer) TraceRelationPath(snapshot domain.Snapshot, sourceID, targetID string) (domain.RelationPathResult, error) {
 	known := map[string]bool{}
-	for _, unit := range snapshot.Units {
-		known[unit.ID] = true
+	for _, unitID := range a.unitIDs(snapshot.Units) {
+		known[unitID] = true
 	}
 	if !known[sourceID] || !known[targetID] {
 		return domain.RelationPathResult{}, domain.NewError(domain.CodeValidation, "起点或终点单位不属于当前案卷")

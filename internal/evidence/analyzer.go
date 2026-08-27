@@ -8,16 +8,30 @@ import (
 	"strata-proof/internal/domain"
 )
 
-type Analyzer struct{}
+type Analyzer struct {
+	unitScratch []string
+}
 
-func NewAnalyzer() *Analyzer { return &Analyzer{} }
+func NewAnalyzer() *Analyzer { return &Analyzer{unitScratch: make([]string, 64)} }
+
+func (a *Analyzer) unitIDs(units []domain.StratigraphicUnit) []string {
+	if len(a.unitScratch) < len(units) {
+		a.unitScratch = make([]string, len(units))
+	}
+	ids := a.unitScratch[:len(units)]
+	for index := range units {
+		ids[index] = units[index].ID
+	}
+	return ids
+}
 
 func (a *Analyzer) Analyze(dossierID, runID string, units []domain.StratigraphicUnit, relations []domain.StratigraphicRelation) []domain.ConsistencyFinding {
+	unitIDs := a.unitIDs(units)
 	var findings []domain.ConsistencyFinding
 	findings = append(findings, missingEvidence(dossierID, runID, units, relations)...)
 	findings = append(findings, isolatedUnits(dossierID, runID, units, relations)...)
 	findings = append(findings, mutualExclusions(dossierID, runID, relations)...)
-	findings = append(findings, cycles(dossierID, runID, units, relations)...)
+	findings = append(findings, cycles(dossierID, runID, unitIDs, relations)...)
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].Severity != findings[j].Severity {
 			return severityRank(findings[i].Severity) < severityRank(findings[j].Severity)
@@ -103,7 +117,7 @@ func mutualExclusions(dossierID, runID string, relations []domain.StratigraphicR
 	return out
 }
 
-func cycles(dossierID, runID string, units []domain.StratigraphicUnit, relations []domain.StratigraphicRelation) []domain.ConsistencyFinding {
+func cycles(dossierID, runID string, unitIDs []string, relations []domain.StratigraphicRelation) []domain.ConsistencyFinding {
 	adj := map[string][]domain.StratigraphicRelation{}
 	for _, relation := range relations {
 		if relation.RelationType != domain.RelationContemporary {
@@ -147,9 +161,9 @@ func cycles(dossierID, runID string, units []domain.StratigraphicUnit, relations
 		stackUnits = stackUnits[:len(stackUnits)-1]
 		color[node] = 2
 	}
-	for _, unit := range units {
-		if color[unit.ID] == 0 {
-			visit(unit.ID)
+	for _, unitID := range unitIDs {
+		if color[unitID] == 0 {
+			visit(unitID)
 		}
 	}
 	return out

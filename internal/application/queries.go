@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"strata-proof/internal/domain"
-	"strata-proof/internal/evidence"
 )
 
 func (s *Service) CheckBatches(ctx context.Context, dossierID, severity, changeType string) ([]domain.CheckBatch, error) {
@@ -48,7 +47,7 @@ func (s *Service) TraceRelationPath(ctx context.Context, dossierID, sourceID, ta
 	if err != nil {
 		return domain.RelationPathResult{}, err
 	}
-	return evidence.TraceRelationPath(snapshot, sourceID, targetID)
+	return s.analyzer.TraceRelationPath(snapshot, sourceID, targetID)
 }
 
 func (s *Service) UnitHistory(ctx context.Context, dossierID, unitID string) (domain.RevisionLedger, error) {
