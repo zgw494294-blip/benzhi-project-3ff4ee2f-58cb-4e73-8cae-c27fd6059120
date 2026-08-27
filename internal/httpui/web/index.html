@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>地层证据校核工作台</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div><p class="eyebrow">STRATA PROOF · 田野考古</p><h1>地层关系证据校核工作台</h1></div>
+    <div id="statusChip" class="chip">尚未选择案卷</div>
+  </header>
+  <main>
+    <section class="panel hero">
+      <div><h2>从田野记录到可验研究凭据</h2><p>集中登记单位修订、关系证据、矛盾整改与复核冻结。每次写入均带版本校验，审计时间线完整保留。</p></div>
+      <button id="refreshButton" class="secondary">刷新案卷列表</button>
+    </section>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <section class="grid two">
+      <article class="panel">
+        <h2>新建探方案卷</h2>
+        <form id="createForm">
+          <label>探方编号<input name="trenchCode" required placeholder="T23E08"></label>
+          <label>发掘区域<input name="excavationArea" required placeholder="遗址北区"></label>
+          <label>记录负责人<input name="leadRecorder" required></label>
+          <label>年代假设<textarea name="chronologyHypothesis" required></textarea></label>
+          <button>创建并打开</button>
+        </form>
+      </article>
+      <article class="panel">
+        <h2>案卷目录</h2>
+        <div id="dossierList" class="list empty">暂无案卷</div>
+      </article>
+    </section>
+    <section id="workspace" hidden>
+      <div class="section-title"><div><p class="eyebrow">CURRENT DOSSIER</p><h2 id="dossierTitle"></h2></div><span id="versionLabel"></span></div>
+      <section class="grid three">
+        <article class="panel metric"><span>单位</span><strong id="unitCount">0</strong></article>
+        <article class="panel metric"><span>关系</span><strong id="relationCount">0</strong></article>
+        <article class="panel metric"><span>待整改</span><strong id="findingCount">0</strong></article>
+      </section>
+      <section class="grid two">
+        <article class="panel">
+          <h3>登记或修订地层单位</h3>
+          <form id="unitForm">
+            <input type="hidden" name="unitID">
+            <div class="row"><label>单位编号<input name="unitCode" required></label><label>单位类型<input name="unitType" required placeholder="堆积/地面/灰坑"></label></div>
+            <label>描述<textarea name="description" required></textarea></label>
+            <div class="row"><label>顶标高<input name="topElevation" type="number" step="0.01" required></label><label>底标高<input name="bottomElevation" type="number" step="0.01" required></label></div>
+            <label>土质特征<textarea name="soilTraits" required></textarea></label>
+            <label>照片引用（逗号分隔）<input name="photoRefs" placeholder="photo://T23-001"></label>
+            <button>保存单位修订</button>
+          </form>
+          <details>
+            <summary>表格批量登记单位</summary>
+            <form id="batchUnitForm">
+              <div class="table-scroll"><table><thead><tr><th>编号</th><th>类型</th><th>描述</th><th>顶标高</th><th>底标高</th><th>土质</th><th>照片引用</th></tr></thead><tbody id="batchUnitRows"></tbody></table></div>
+              <div class="actions"><button type="button" id="addBatchRow" class="secondary">增加一行</button><button>整批保存</button></div>
+              <div id="batchErrors" class="error-list"></div>
+            </form>
+          </details>
+          <div id="unitList" class="list"></div>
+        </article>
+        <article class="panel">
+          <h3>建立或替换地层关系</h3>
+          <form id="relationForm">
+            <input type="hidden" name="relationID">
+            <label>源单位<select name="sourceUnitId" required></select></label>
+            <label>关系类型<select name="relationType"><option value="overlies">叠压</option><option value="cuts">打破</option><option value="contemporary">同期</option></select></label>
+            <label>目标单位<select name="targetUnitId" required></select></label>
+            <label>证据说明<textarea name="evidenceNote" required></textarea></label>
+            <button>保存关系判定</button>
+          </form>
+          <details>
+            <summary>单位关系路径追溯</summary>
+            <form id="pathForm"><div class="row"><label>起点<select name="sourceUnitId" required></select></label><label>终点<select name="targetUnitId" required></select></label></div><button>追溯最短证据路径</button></form>
+            <div id="pathResult"></div>
+          </details>
+          <div id="relationList" class="list"></div>
+        </article>
+      </section>
+      <section class="panel">
+        <div class="section-title"><div><p class="eyebrow">CONSISTENCY</p><h3>关系图检查与整改</h3></div><button id="checkButton">执行一致性检查</button></div>
+        <div class="actions"><label>检查批次<select id="checkBatchSelect"></select></label><label>变化<select id="changeFilter"><option value="">全部</option><option value="added">新增</option><option value="persistent">持续</option><option value="resolved">已消除</option></select></label><label>级别<select id="severityFilter"><option value="">全部</option><option value="error">严重</option><option value="warning">提醒</option></select></label></div>
+        <div id="findingList" class="list empty">尚未执行检查</div>
+      </section>
+      <section class="grid two">
+        <article class="panel">
+          <h3>复核与冻结</h3>
+          <p class="muted">全部问题关闭后提交。复核通过将冻结单位、关系、证据和检查摘要。</p>
+          <fieldset id="reviewChecklist"><legend>结构化复核清单</legend><label><input type="checkbox" name="unitCompleteness">单位字段完整</label><label><input type="checkbox" name="relationEvidence">关系证据完整</label><label><input type="checkbox" name="findingClosure">最新问题闭环</label><label><input type="checkbox" name="manifestPreview">冻结摘要预览已核对</label></fieldset>
+          <div class="row"><label>退回定位类型<select id="returnTargetType"><option value="unit">单位</option><option value="relation">关系</option><option value="finding">问题</option></select></label><label>定位对象<select id="returnTarget"></select></label></div>
+          <div class="actions"><button id="submitButton">提交人工复核</button><button id="approveButton" class="secondary">复核通过并冻结</button><button id="returnButton" class="danger">复核退回</button></div>
+          <div id="remediationList" class="list"></div>
+        </article>
+        <article class="panel">
+          <h3>研究使用凭据</h3>
+          <div class="actions"><button id="issueButton">签发凭据</button></div>
+          <div id="credentialList" class="list"></div>
+          <form id="verifyForm" class="inline"><input name="credentialID" placeholder="输入凭据编号" required><button>核对</button></form>
+          <div id="verification"></div>
+        </article>
+      </section>
+      <section class="panel"><h3>审计时间线</h3><ol id="auditList" class="timeline"></ol></section>
+    </section>
+  </main>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
