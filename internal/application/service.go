@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"strata-proof/internal/domain"
@@ -16,15 +17,26 @@ import (
 type Clock func() time.Time
 
 type Service struct {
-	repo     store.Repository
-	analyzer *evidence.Analyzer
-	issuer   *evidence.CredentialIssuer
-	policy   AuthorizationPolicy
-	now      Clock
+	repo             store.Repository
+	analyzer         *evidence.Analyzer
+	issuer           *evidence.CredentialIssuer
+	policy           AuthorizationPolicy
+	now              Clock
+	verifyMu         sync.RWMutex
+	revoked          map[string]VerificationResult
+	localRevocations map[string]struct{}
 }
 
 func NewService(repo store.Repository, analyzer *evidence.Analyzer, issuer *evidence.CredentialIssuer) *Service {
-	return &Service{repo: repo, analyzer: analyzer, issuer: issuer, policy: AuthorizationPolicy{}, now: time.Now}
+	return &Service{
+		repo:             repo,
+		analyzer:         analyzer,
+		issuer:           issuer,
+		policy:           AuthorizationPolicy{},
+		now:              time.Now,
+		revoked:          make(map[string]VerificationResult),
+		localRevocations: make(map[string]struct{}),
+	}
 }
 
 func (s *Service) CreateDossier(ctx context.Context, cmd CreateDossierCommand) (domain.Snapshot, error) {

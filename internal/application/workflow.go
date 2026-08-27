@@ -357,7 +357,48 @@ func (s *Service) IssueCredential(ctx context.Context, cmd IssueCommand) (domain
 	})
 }
 
+func cloneVerificationResult(result VerificationResult) VerificationResult {
+	result.Audit = append([]domain.AuditEntry(nil), result.Audit...)
+	if result.Manifest != nil {
+		manifest := *result.Manifest
+		result.Manifest = &manifest
+	}
+	return result
+}
+
+func (s *Service) cachedRevokedVerification(id string) (VerificationResult, bool) {
+	s.verifyMu.RLock()
+	defer s.verifyMu.RUnlock()
+	result, ok := s.revoked[id]
+	return cloneVerificationResult(result), ok
+}
+
+func (s *Service) rememberRevokedVerification(id string, result VerificationResult) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	s.revoked[id] = cloneVerificationResult(result)
+}
+
+func (s *Service) rememberLocalRevocation(id string) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	s.localRevocations[id] = struct{}{}
+}
+
+func (s *Service) invalidateLocallyReissuedVerification(id string) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	if _, ok := s.localRevocations[id]; !ok {
+		return
+	}
+	delete(s.revoked, id)
+	delete(s.localRevocations, id)
+}
+
 func (s *Service) VerifyCredential(ctx context.Context, id string) (VerificationResult, error) {
+	if result, ok := s.cachedRevokedVerification(id); ok {
+		return result, nil
+	}
 	snapshot, credential, err := s.repo.FindCredential(ctx, id)
 	if err != nil {
 		return VerificationResult{}, err
@@ -370,6 +411,7 @@ func (s *Service) VerifyCredential(ctx context.Context, id string) (Verification
 	}
 	if credential.Status == "revoked" {
 		result.Message = "凭据已撤销：" + credential.RevocationReason
+		s.rememberRevokedVerification(id, result)
 		return result, nil
 	}
 	if err := s.repo.ValidateReferences(ctx, *snapshot.Manifest); err != nil {
@@ -385,7 +427,7 @@ func (s *Service) VerifyCredential(ctx context.Context, id string) (Verification
 }
 
 func (s *Service) RevokeCredential(ctx context.Context, cmd RevokeCredentialCommand) (domain.Snapshot, error) {
-	return s.mutate(ctx, cmd.DossierID, cmd.ExpectedVersion, cmd.Actor, cmd.IdempotencyKey, domain.EventCredentialRevoked, "撤销研究使用凭据", func(snapshot *domain.Snapshot) error {
+	snapshot, err := s.mutate(ctx, cmd.DossierID, cmd.ExpectedVersion, cmd.Actor, cmd.IdempotencyKey, domain.EventCredentialRevoked, "撤销研究使用凭据", func(snapshot *domain.Snapshot) error {
 		if snapshot.Dossier.Status != domain.StatusIssued {
 			return domain.NewError(domain.CodeState, "只有已签发案卷的有效凭据可以撤销")
 		}
@@ -413,10 +455,14 @@ func (s *Service) RevokeCredential(ctx context.Context, cmd RevokeCredentialComm
 		}
 		return domain.NewError(domain.CodeNotFound, "研究凭据不存在")
 	})
+	if err == nil {
+		s.rememberLocalRevocation(cmd.CredentialID)
+	}
+	return snapshot, err
 }
 
 func (s *Service) ReissueCredential(ctx context.Context, cmd ReissueCredentialCommand) (domain.Snapshot, error) {
-	return s.mutate(ctx, cmd.DossierID, cmd.ExpectedVersion, cmd.Actor, cmd.IdempotencyKey, domain.EventCredentialReissued, "关联补发研究使用凭据", func(snapshot *domain.Snapshot) error {
+	snapshot, err := s.mutate(ctx, cmd.DossierID, cmd.ExpectedVersion, cmd.Actor, cmd.IdempotencyKey, domain.EventCredentialReissued, "关联补发研究使用凭据", func(snapshot *domain.Snapshot) error {
 		if snapshot.Dossier.Status != domain.StatusIssued || snapshot.Manifest == nil || snapshot.Review == nil {
 			return domain.NewError(domain.CodeState, "只有已签发且冻结摘要完整的案卷可以补发凭据")
 		}
@@ -458,4 +504,8 @@ func (s *Service) ReissueCredential(ctx context.Context, cmd ReissueCredentialCo
 		snapshot.Credentials = append(snapshot.Credentials, credential)
 		return nil
 	})
+	if err == nil {
+		s.invalidateLocallyReissuedVerification(cmd.CredentialID)
+	}
+	return snapshot, err
 }
