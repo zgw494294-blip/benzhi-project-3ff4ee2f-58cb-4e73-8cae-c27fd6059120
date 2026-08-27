@@ -360,7 +360,7 @@ func (s *Service) IssueCredential(ctx context.Context, cmd IssueCommand) (domain
 func (s *Service) VerifyCredential(ctx context.Context, id string) (VerificationResult, error) {
 	snapshot, credential, err := s.repo.FindCredential(ctx, id)
 	if err != nil {
-		return VerificationResult{}, err
+		return VerificationResult{}, fmt.Errorf("读取研究凭据 %s: %w", id, err)
 	}
 	result := VerificationResult{Credential: credential, Dossier: snapshot.Dossier, Manifest: snapshot.Manifest, Audit: snapshot.Audit}
 	result.ReplacementCredentialID = credential.ReplacementCredentialID

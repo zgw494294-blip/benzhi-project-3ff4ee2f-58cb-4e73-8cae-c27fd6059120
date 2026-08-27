@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -49,7 +50,11 @@ func (s *Service) CreateDossier(ctx context.Context, cmd CreateDossierCommand) (
 }
 
 func (s *Service) GetDossier(ctx context.Context, id string) (domain.Snapshot, error) {
-	return s.repo.Get(ctx, id)
+	snapshot, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return snapshot, fmt.Errorf("读取案卷 %s: %w", id, err)
+	}
+	return snapshot, nil
 }
 func (s *Service) ListDossiers(ctx context.Context, limit, offset int) ([]domain.TrenchDossier, error) {
 	return s.repo.List(ctx, limit, offset)

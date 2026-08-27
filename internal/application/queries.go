@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"strata-proof/internal/domain"
@@ -11,7 +12,7 @@ import (
 func (s *Service) CheckBatches(ctx context.Context, dossierID, severity, changeType string) ([]domain.CheckBatch, error) {
 	snapshot, err := s.repo.Get(ctx, dossierID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("读取案卷 %s 的检查批次: %w", dossierID, err)
 	}
 	severity, changeType = strings.TrimSpace(severity), strings.TrimSpace(changeType)
 	if severity != "" && severity != "error" && severity != "warning" {
@@ -46,7 +47,7 @@ func (s *Service) CheckBatches(ctx context.Context, dossierID, severity, changeT
 func (s *Service) TraceRelationPath(ctx context.Context, dossierID, sourceID, targetID string) (domain.RelationPathResult, error) {
 	snapshot, err := s.repo.Get(ctx, dossierID)
 	if err != nil {
-		return domain.RelationPathResult{}, err
+		return domain.RelationPathResult{}, fmt.Errorf("读取案卷 %s 的关系路径: %w", dossierID, err)
 	}
 	return evidence.TraceRelationPath(snapshot, sourceID, targetID)
 }
@@ -54,7 +55,7 @@ func (s *Service) TraceRelationPath(ctx context.Context, dossierID, sourceID, ta
 func (s *Service) UnitHistory(ctx context.Context, dossierID, unitID string) (domain.RevisionLedger, error) {
 	revisions, err := s.repo.UnitHistory(ctx, dossierID, unitID)
 	if err != nil {
-		return domain.RevisionLedger{}, err
+		return domain.RevisionLedger{}, fmt.Errorf("读取案卷 %s 的单位 %s 修订历史: %w", dossierID, unitID, err)
 	}
 	return domain.RevisionLedger{DossierID: dossierID, UnitID: unitID, UnitRevisions: revisions, RelationRevisions: []domain.StratigraphicRelation{}}, nil
 }
@@ -62,13 +63,17 @@ func (s *Service) UnitHistory(ctx context.Context, dossierID, unitID string) (do
 func (s *Service) RelationHistory(ctx context.Context, dossierID, relationID string) (domain.RevisionLedger, error) {
 	revisions, err := s.repo.RelationHistory(ctx, dossierID, relationID)
 	if err != nil {
-		return domain.RevisionLedger{}, err
+		return domain.RevisionLedger{}, fmt.Errorf("读取案卷 %s 的关系 %s 修订历史: %w", dossierID, relationID, err)
 	}
 	return domain.RevisionLedger{DossierID: dossierID, RelationID: relationID, UnitRevisions: []domain.StratigraphicUnit{}, RelationRevisions: revisions}, nil
 }
 
 func (s *Service) AuditPage(ctx context.Context, dossierID string, limit int, before int64) ([]domain.AuditEntry, error) {
-	return s.repo.AuditPage(ctx, dossierID, limit, before)
+	entries, err := s.repo.AuditPage(ctx, dossierID, limit, before)
+	if err != nil {
+		return nil, fmt.Errorf("读取案卷 %s 的审计分页: %w", dossierID, err)
+	}
+	return entries, nil
 }
 
 func (s *Service) ValidateFrozenReferences(ctx context.Context, snapshot domain.Snapshot) error {
