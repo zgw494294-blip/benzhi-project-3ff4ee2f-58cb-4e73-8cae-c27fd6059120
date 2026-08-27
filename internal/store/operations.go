@@ -35,7 +35,10 @@ func (s *SQLiteStore) Create(ctx context.Context, snapshot domain.Snapshot, key 
 	if err := insertIdempotency(ctx, tx, key, snapshot.Dossier.ID, response); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.persistCredentials(ctx, snapshot)
 }
 
 func (s *SQLiteStore) Save(ctx context.Context, snapshot domain.Snapshot, expected int64, key string, response json.RawMessage) error {
@@ -68,7 +71,10 @@ func (s *SQLiteStore) Save(ctx context.Context, snapshot domain.Snapshot, expect
 	if err := insertIdempotency(ctx, tx, key, snapshot.Dossier.ID, response); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.persistCredentials(ctx, snapshot)
 }
 
 func persistChildren(ctx context.Context, tx *sql.Tx, snapshot domain.Snapshot) error {
@@ -106,12 +112,6 @@ func persistChildren(ctx context.Context, tx *sql.Tx, snapshot domain.Snapshot) 
 			return err
 		}
 	}
-	for _, credential := range snapshot.Credentials {
-		data, _ := json.Marshal(credential)
-		if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO credentials(credential_id,dossier_id,digest,content_json,issued_at) VALUES(?,?,?,?,?)`, credential.CredentialID, snapshot.Dossier.ID, credential.FrozenManifestDigest, data, credential.IssuedAt.UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
-	}
 	for _, entry := range snapshot.Audit {
 		data, _ := json.Marshal(entry)
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO audit_entries(dossier_id,sequence,content_json,occurred_at) VALUES(?,?,?,?)`, snapshot.Dossier.ID, entry.Sequence, data, entry.OccurredAt.UTC().Format(time.RFC3339Nano)); err != nil {
@@ -119,6 +119,24 @@ func persistChildren(ctx context.Context, tx *sql.Tx, snapshot domain.Snapshot) 
 		}
 	}
 	return nil
+}
+
+func (s *SQLiteStore) persistCredentials(ctx context.Context, snapshot domain.Snapshot) error {
+	if len(snapshot.Credentials) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, credential := range snapshot.Credentials {
+		data, _ := json.Marshal(credential)
+		if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO credentials(credential_id,dossier_id,digest,content_json,issued_at) VALUES(?,?,?,?,?)`, credential.CredentialID, snapshot.Dossier.ID, credential.FrozenManifestDigest, data, credential.IssuedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func insertIdempotency(ctx context.Context, tx *sql.Tx, key, dossierID string, response json.RawMessage) error {
