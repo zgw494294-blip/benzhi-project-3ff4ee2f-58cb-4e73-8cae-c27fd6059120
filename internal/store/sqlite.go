@@ -4,12 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
+
+	"strata-proof/internal/domain"
 
 	_ "modernc.org/sqlite"
 )
 
-type SQLiteStore struct{ db *sql.DB }
+type SQLiteStore struct {
+	db        *sql.DB
+	cacheMu   sync.RWMutex
+	snapshots map[string]domain.Snapshot
+}
 
 func Open(path string) (*SQLiteStore, error) {
 	dsn := path
@@ -28,7 +35,7 @@ func Open(path string) (*SQLiteStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("连接 SQLite: %w", err)
 	}
-	store := &SQLiteStore{db: db}
+	store := &SQLiteStore{db: db, snapshots: map[string]domain.Snapshot{}}
 	if err := store.migrate(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -37,3 +44,16 @@ func Open(path string) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) Close() error { return s.db.Close() }
+
+func (s *SQLiteStore) cachedSnapshot(id string) (domain.Snapshot, bool) {
+	s.cacheMu.RLock()
+	defer s.cacheMu.RUnlock()
+	snapshot, ok := s.snapshots[id]
+	return snapshot, ok
+}
+
+func (s *SQLiteStore) rememberSnapshot(snapshot domain.Snapshot) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.snapshots[snapshot.Dossier.ID] = snapshot
+}

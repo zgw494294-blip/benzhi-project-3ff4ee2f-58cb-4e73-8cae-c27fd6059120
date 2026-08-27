@@ -35,7 +35,11 @@ func (s *SQLiteStore) Create(ctx context.Context, snapshot domain.Snapshot, key 
 	if err := insertIdempotency(ctx, tx, key, snapshot.Dossier.ID, response); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.rememberSnapshot(snapshot)
+	return nil
 }
 
 func (s *SQLiteStore) Save(ctx context.Context, snapshot domain.Snapshot, expected int64, key string, response json.RawMessage) error {
@@ -68,7 +72,11 @@ func (s *SQLiteStore) Save(ctx context.Context, snapshot domain.Snapshot, expect
 	if err := insertIdempotency(ctx, tx, key, snapshot.Dossier.ID, response); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.rememberSnapshot(snapshot)
+	return nil
 }
 
 func persistChildren(ctx context.Context, tx *sql.Tx, snapshot domain.Snapshot) error {
@@ -133,6 +141,12 @@ func insertIdempotency(ctx context.Context, tx *sql.Tx, key, dossierID string, r
 }
 
 func (s *SQLiteStore) Get(ctx context.Context, id string) (domain.Snapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Snapshot{}, err
+	}
+	if snapshot, ok := s.cachedSnapshot(id); ok {
+		return snapshot, nil
+	}
 	var data []byte
 	err := s.db.QueryRowContext(ctx, `SELECT snapshot_json FROM dossiers WHERE id=?`, id).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -151,6 +165,7 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (domain.Snapshot, erro
 	if err := s.validateNormalizedSnapshot(ctx, snapshot); err != nil {
 		return snapshot, fmt.Errorf("校验持久化账本: %w", err)
 	}
+	s.rememberSnapshot(snapshot)
 	return snapshot, nil
 }
 
