@@ -4,12 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
-type SQLiteStore struct{ db *sql.DB }
+type SQLiteStore struct {
+	db                 *sql.DB
+	historyMu          sync.Mutex
+	unitHistoryCursors map[unitHistoryCursorKey]*sql.Rows
+}
 
 func Open(path string) (*SQLiteStore, error) {
 	dsn := path
@@ -28,7 +33,7 @@ func Open(path string) (*SQLiteStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("连接 SQLite: %w", err)
 	}
-	store := &SQLiteStore{db: db}
+	store := &SQLiteStore{db: db, unitHistoryCursors: make(map[unitHistoryCursorKey]*sql.Rows)}
 	if err := store.migrate(ctx); err != nil {
 		db.Close()
 		return nil, err

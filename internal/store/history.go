@@ -10,11 +10,31 @@ import (
 	"strata-proof/internal/domain"
 )
 
+type unitHistoryCursorKey struct {
+	dossierID string
+	unitID    string
+}
+
+func (s *SQLiteStore) unitHistoryRows(ctx context.Context, dossierID, unitID string) (*sql.Rows, error) {
+	key := unitHistoryCursorKey{dossierID: dossierID, unitID: unitID}
+	s.historyMu.Lock()
+	defer s.historyMu.Unlock()
+	if rows, ok := s.unitHistoryCursors[key]; ok {
+		return rows, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT content_json FROM unit_revisions WHERE dossier_id=? AND unit_id=? ORDER BY revision ASC`, dossierID, unitID)
+	if err != nil {
+		return nil, err
+	}
+	s.unitHistoryCursors[key] = rows
+	return rows, nil
+}
+
 func (s *SQLiteStore) UnitHistory(ctx context.Context, dossierID, unitID string) ([]domain.StratigraphicUnit, error) {
 	if err := s.ensureDossier(ctx, dossierID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT content_json FROM unit_revisions WHERE dossier_id=? AND unit_id=? ORDER BY revision ASC`, dossierID, unitID)
+	rows, err := s.unitHistoryRows(ctx, dossierID, unitID)
 	if err != nil {
 		return nil, err
 	}
